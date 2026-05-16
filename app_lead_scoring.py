@@ -197,21 +197,47 @@ if st.session_state.df is not None:
 
     # --- THỐNG KÊ & XUẤT FILE ---
     st.divider()
-    c1, c2 = st.columns([1, 1])
-    
+    # Tính toán dựa trên dữ liệu ĐANG HIỂN THỊ (đã lọc)
+    total_view = len(edited_filtered_df)
+    vips_view = len(edited_filtered_df[edited_filtered_df['Phân loại'] == 'VIP'])
+    potential_view = len(edited_filtered_df[edited_filtered_df['Phân loại'] == 'Tiềm năng'])
+    trash_view = len(edited_filtered_df[edited_filtered_df['Phân loại'] == 'Rác'])
+
+    c1, c2, c3, c4 = st.columns(4)
     with c1:
-        vips = len(st.session_state.df[st.session_state.df['Phân loại'] == 'VIP'])
-        st.metric("Tổng số khách hàng VIP", vips)
-    
+        st.metric("Tổng đang xem", total_view)
     with c2:
-        output = BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            st.session_state.df.to_excel(writer, index=False, sheet_name='Leads_Results')
+        st.metric("Khách hàng VIP", vips_view)
+    with c3:
+        st.metric("Tiềm năng", potential_view)
+    with c4:
+        st.metric("Khách rác", trash_view)
+    
+    st.divider()
+    # Nút xuất Excel (Xuất toàn bộ dữ liệu đã được cập nhật hoặc chỉ dữ liệu đang lọc)
+    # Ở đây tôi cho phép chọn xuất dữ liệu đang hiển thị (đã lọc)
+    c_btn1, c_btn2 = st.columns(2)
+    with c_btn1:
+        output_filtered = BytesIO()
+        with pd.ExcelWriter(output_filtered, engine='openpyxl') as writer:
+            edited_filtered_df.to_excel(writer, index=False, sheet_name='Leads_Filtered')
         
         st.download_button(
-            label="📊 Tải file Excel bàn giao",
-            data=output.getvalue(),
-            file_name="Leads_Scoring_Results.xlsx",
+            label="📊 Tải Excel (Dữ liệu ĐANG LỌC)",
+            data=output_filtered.getvalue(),
+            file_name="Leads_Filtered_Results.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+    
+    with c_btn2:
+        output_all = BytesIO()
+        with pd.ExcelWriter(output_all, engine='openpyxl') as writer:
+            st.session_state.df.to_excel(writer, index=False, sheet_name='Leads_All')
+            
+        st.download_button(
+            label="📁 Tải Excel (TOÀN BỘ dữ liệu)",
+            data=output_all.getvalue(),
+            file_name="Leads_All_Results.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 else:
