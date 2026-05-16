@@ -109,6 +109,11 @@ with col1:
         with st.spinner("Đang tải dữ liệu..."):
             try:
                 st.session_state.df = pd.read_csv(sheet_url)
+                # Khởi tạo các cột kết quả nếu chưa có để tránh lỗi KeyError
+                if 'Điểm AI' not in st.session_state.df.columns:
+                    st.session_state.df['Điểm AI'] = 0
+                    st.session_state.df['Phân loại'] = "Chưa chấm"
+                    st.session_state.df['Lý do'] = ""
                 st.success(f"Đã tải {len(st.session_state.df)} dòng!")
             except Exception as e:
                 st.error(f"Lỗi tải dữ liệu: {e}")
