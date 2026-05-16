@@ -1,54 +1,105 @@
 import streamlit as st
 import pandas as pd
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
 import os
 from io import BytesIO
 
 # --- CẤU HÌNH TRANG ---
 st.set_page_config(
-    page_title="AI Lead Scoring System",
-    page_icon="🎯",
+    page_title="MindX AI Lead Scoring",
+    page_icon="🏠",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# --- PHONG CÁCH GIAO DIỆN (CSS) ---
+# --- PHONG CÁCH GIAO DIỆN (CSS TÙY CHỈNH) ---
 st.markdown("""
     <style>
+    /* Tổng thể */
     .main {
-        background-color: #f8f9fa;
+        background-color: #ffffff;
     }
+    
+    /* Tùy chỉnh Sidebar */
+    [data-testid="stSidebar"] {
+        background-color: #1e293b;
+        color: white;
+    }
+    [data-testid="stSidebar"] * {
+        color: white !important;
+    }
+    
+    /* Nút bấm */
     .stButton>button {
         width: 100%;
-        border-radius: 8px;
-        height: 3em;
-        background-color: #007bff;
+        border-radius: 12px;
+        height: 3.5em;
+        background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
         color: white;
         font-weight: bold;
         border: none;
-        transition: 0.3s;
+        transition: all 0.3s ease;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
     }
     .stButton>button:hover {
-        background-color: #0056b3;
-        box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        transform: translateY(-2px);
+        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.2);
+        background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
     }
-    .vip-card {
-        padding: 10px;
-        border-radius: 5px;
-        background-color: #FFD700;
-        color: black;
-        font-weight: bold;
+    
+    /* Thẻ chỉ số (Metrics Custom) */
+    .metric-container {
+        background: white;
+        padding: 20px;
+        border-radius: 15px;
+        border: 1px solid #e2e8f0;
+        box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
         text-align: center;
+    }
+    
+    /* Banner */
+    .banner {
+        background: linear-gradient(90deg, #ef4444 0%, #f97316 100%);
+        padding: 40px;
+        border-radius: 20px;
+        color: white;
+        text-align: center;
+        margin-bottom: 30px;
     }
     </style>
     """, unsafe_allow_html=True)
 
-# --- LOGIC CHẤM ĐIỂM NỘI BỘ (KHÔNG CẦN API KEY) ---
+# --- LOGIC KẾT NỐI GOOGLE SHEETS (PRIVATE) ---
+def load_data_from_gsheet():
+    try:
+        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+        # Thử tìm file credentials.json
+        creds_path = "credentials.json"
+        if not os.path.exists(creds_path):
+            st.error("❌ Không tìm thấy file credentials.json!")
+            return None
+            
+        creds = ServiceAccountCredentials.from_json_keyfile_name(creds_path, scope)
+        client = gspread.authorize(creds)
+        
+        # Mở bằng ID đã cho
+        sheet_id = "1zzbszm-d1yyqvAqVPc5n_Re545bG4h8rRWZmT-D-pCM"
+        sheet = client.open_by_key(sheet_id).sheet1
+        
+        data = sheet.get_all_records()
+        return pd.DataFrame(data)
+    except Exception as e:
+        st.error(f"❌ Lỗi kết nối Google Sheets: {str(e)}")
+        return None
+
+# --- LOGIC CHẤM ĐIỂM NỘI BỘ ---
 def score_lead_local(description):
     desc = str(description).lower()
     score = 0
     reasons = []
     
-    # VIP Criteria
+    # VIP Criteria (+50)
     if any(k in desc for k in ["20 tỷ", "30 tỷ", "50 tỷ", "100 tỷ", "tài chính mạnh", "không thành vấn đề"]):
         score += 50
         reasons.append("Ngân sách lớn")
@@ -58,23 +109,14 @@ def score_lead_local(description):
     if any(k in desc for k in ["quận 1", "ven sông", "vinhomes", "phú mỹ hưng"]):
         score += 50
         reasons.append("Vị trí đắc địa")
-    if any(k in desc for k in ["chủ doanh nghiệp", "nhà đầu tư", "mua sỉ"]):
-        score += 50
-        reasons.append("Khách hàng VIP")
-    if any(k in desc for k in ["pháp lý", "sổ hồng", "chủ đầu tư"]):
-        score += 50
-        reasons.append("Pháp lý/Cấp thiết")
-
-    # Trash Criteria
+    
+    # Trash Criteria (-50)
+    if any(k in desc for k in ["nhầm số", "không có nhu cầu", "dữ liệu cũ", "hỏi giá cho vui"]):
+        score -= 50
+        reasons.append("Dữ liệu rác/Không nhu cầu")
     if "quận 1" in desc and any(k in desc for k in ["1 tỷ", "2 tỷ"]):
         score -= 50
         reasons.append("Giá phi thực tế")
-    if any(k in desc for k in ["nhầm số", "không có nhu cầu", "dữ liệu cũ"]):
-        score -= 50
-        reasons.append("Dữ liệu lỗi")
-    if any(k in desc for k in ["bảo hiểm", "vay vốn", "quảng cáo"]):
-        score -= 50
-        reasons.append("Spam/Dịch vụ khác")
         
     category = "Tiềm năng"
     if score >= 50: category = "VIP"
@@ -82,166 +124,132 @@ def score_lead_local(description):
     
     return score, category, "; ".join(reasons)
 
-# --- SIDEBAR ---
+# --- SIDEBAR (LOGO & FILTER) ---
 with st.sidebar:
-    st.image("https://img.icons8.com/clouds/100/000000/manager.png", width=100)
-    st.title("⚙️ Hệ thống Lead Scoring")
+    # Logo MindX (Placeholder URL hoặc từ local nếu có)
+    st.image("https://mindx.edu.vn/images/logo.png", width=200) # Logo thương hiệu
+    st.divider()
+    st.title("⚙️ CẤU HÌNH HỆ THỐNG")
     
-    st.success("✅ Chế độ: Chấm điểm Nội bộ (Không cần API Key)")
-    
-    sheet_id = "1zzbszm-d1yyqvAqVPc5n_Re545bG4h8rRWZmT-D-pCM"
-    sheet_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv"
+    st.success("🤖 AI Agent: Đang hoạt động")
     
     st.divider()
-    st.subheader("🔍 Bộ lọc dữ liệu")
-    
-    # Lọc theo Phân loại
+    st.subheader("🔍 BỘ LỌC TÌM KIẾM")
     filter_cat = st.multiselect(
-        "Lọc theo Phân loại",
+        "Lọc trạng thái",
         options=["VIP", "Tiềm năng", "Rác", "Chưa chấm"],
         default=["VIP", "Tiềm năng", "Rác", "Chưa chấm"]
     )
-    
-    # Tìm kiếm theo tên hoặc nội dung
-    search_query = st.text_input("Tìm kiếm (Tên/Mô tả)", placeholder="Nhập từ khóa...")
-    
-    st.divider()
-    st.info("💡 **Quy trình:**\n1. Lấy dữ liệu từ Google Sheets.\n2. Hệ thống tự động chấm điểm.\n3. Sử dụng bộ lọc để kiểm duyệt và Xuất Excel.")
+    search_query = st.text_input("Tìm khách hàng...", placeholder="Nhập tên hoặc nhu cầu...")
 
 # --- GIAO DIỆN CHÍNH ---
-st.title("🎯 AI LEAD SCORING & AUTOMATION")
-st.subheader("Hệ thống chấm điểm khách hàng tiềm năng tự động")
+# Banner chào mừng
+st.markdown("""
+    <div class="banner">
+        <h1>🎯 AI LEAD SCORING SYSTEM</h1>
+        <p>Hệ thống tự động hóa phân loại & chấm điểm khách hàng Bất động sản</p>
+    </div>
+    """, unsafe_allow_html=True)
 
 if 'df' not in st.session_state:
     st.session_state.df = None
 
-col1, col2 = st.columns([1, 4])
-
-with col1:
-    if st.button("📥 Lấy dữ liệu từ Sheets"):
-        with st.spinner("Đang tải dữ liệu..."):
-            try:
-                st.session_state.df = pd.read_csv(sheet_url)
-                # Khởi tạo các cột kết quả nếu chưa có để tránh lỗi KeyError
+# Nút chức năng chính
+c_act1, c_act2 = st.columns(2)
+with c_act1:
+    if st.button("📥 1. LẤY DỮ LIỆU TỪ GOOGLE SHEETS"):
+        with st.spinner("Đang kết nối API bảo mật..."):
+            df_new = load_data_from_gsheet()
+            if df_new is not None:
+                st.session_state.df = df_new
                 if 'Điểm AI' not in st.session_state.df.columns:
                     st.session_state.df['Điểm AI'] = 0
                     st.session_state.df['Phân loại'] = "Chưa chấm"
                     st.session_state.df['Lý do'] = ""
-                st.success(f"Đã tải {len(st.session_state.df)} dòng!")
-            except Exception as e:
-                st.error(f"Lỗi tải dữ liệu: {e}")
+                st.success(f"✅ Đã tải thành công {len(st.session_state.df)} Leads từ hệ thống!")
 
-with col2:
-    if st.button("🤖 Bắt đầu chấm điểm tự động") and st.session_state.df is not None:
+with c_act2:
+    if st.button("🤖 2. CHẠY AI SCORING TỰ ĐỘNG") and st.session_state.df is not None:
         progress_bar = st.progress(0)
-        status_text = st.empty()
-        
-        # Tạo các cột mới
-        scores = []
-        categories = []
-        reasons = []
+        status = st.empty()
         
         for index, row in st.session_state.df.iterrows():
-            status_text.text(f"Đang xử lý: {row['ten_khach']}...")
+            status.text(f"⏳ Đang quét mô tả khách hàng: {row['ten_khach']}...")
             s, c, r = score_lead_local(row['nhu_cau_mo_ta'])
-            scores.append(s)
-            categories.append(c)
-            reasons.append(r)
+            st.session_state.df.at[index, 'Điểm AI'] = s
+            st.session_state.df.at[index, 'Phân loại'] = c
+            st.session_state.df.at[index, 'Lý do'] = r
             progress_bar.progress((index + 1) / len(st.session_state.df))
         
-        st.session_state.df['Điểm AI'] = scores
-        st.session_state.df['Phân loại'] = categories
-        st.session_state.df['Lý do'] = reasons
-        
-        status_text.text("✅ Hoàn thành chấm điểm!")
+        status.success("🚀 Hoàn thành phân loại tự động!")
         st.balloons()
 
-# --- HIỂN THỊ & KIỂM DUYỆT ---
+# --- DASHBOARD METRICS (THEO YÊU CẦU 3 CỘT) ---
 if st.session_state.df is not None:
     st.divider()
-    st.subheader("📝 Kiểm duyệt & Bàn giao (Human-in-the-loop)")
+    st.subheader("📊 DASHBOARD TỔNG QUAN")
     
-    # --- ÁP DỤNG BỘ LỌC ---
+    # Áp dụng bộ lọc cho Metric
     df_filtered = st.session_state.df.copy()
-    
-    # Lọc theo Phân loại
     if filter_cat:
         df_filtered = df_filtered[df_filtered['Phân loại'].isin(filter_cat)]
-    
-    # Lọc theo Tìm kiếm
     if search_query:
         search_query = search_query.lower()
         df_filtered = df_filtered[
-            df_filtered['ten_khach'].str.lower().str.contains(search_query, na=False) | 
+            df_filtered['ten_khach'].str.lower().str.contains(search_query, na=False) |
             df_filtered['nhu_cau_mo_ta'].str.lower().str.contains(search_query, na=False)
         ]
 
-    # Hiển thị bảng kết quả cho phép sửa
-    # Lưu ý: Vì st.data_editor trả về dữ liệu đã sửa, ta cần ánh xạ lại vào session_state gốc
-    edited_filtered_df = st.data_editor(
+    m1, m2, m3 = st.columns(3)
+    with m1:
+        st.metric("👥 Tổng khách hàng", len(df_filtered))
+    with m2:
+        vips = len(df_filtered[df_filtered['Phân loại'] == 'VIP'])
+        st.metric("🏆 Khách hàng VIP (+50đ)", vips)
+    with m3:
+        trash = len(df_filtered[df_filtered['Phân loại'] == 'Rác'])
+        st.metric("🗑️ Khách hàng Rác (-50đ)", trash)
+
+    # --- BẢNG KIỂM TRA (AUDIT TABLE) ---
+    st.divider()
+    st.subheader("📝 BẢNG KIỂM TRA & DUYỆT DỮ LIỆU (AUDIT)")
+    
+    edited_df = st.data_editor(
         df_filtered,
         column_config={
-            "Điểm AI": st.column_config.NumberColumn("Điểm"),
-            "Phân loại": st.column_config.SelectboxColumn("Phân loại", options=["VIP", "Tiềm năng", "Rác", "Chưa chấm"]),
+            "Điểm AI": st.column_config.NumberColumn("Điểm", format="%d"),
+            "Phân loại": st.column_config.SelectboxColumn("Trạng thái", options=["VIP", "Tiềm năng", "Rác", "Chưa chấm"]),
         },
         use_container_width=True,
         hide_index=True,
-        key="data_editor"
+        key="audit_editor"
     )
-    
-    # Cập nhật lại session_state.df dựa trên các thay đổi trong edited_filtered_df
-    if st.button("💾 Lưu thay đổi vừa sửa"):
-        # Ánh xạ kết quả sửa từ bảng lọc quay lại bảng tổng
-        st.session_state.df.update(edited_filtered_df)
-        st.success("Đã lưu thay đổi vào hệ thống!")
 
-    # --- THỐNG KÊ & XUẤT FILE ---
-    st.divider()
-    # Tính toán dựa trên dữ liệu ĐANG HIỂN THỊ (đã lọc)
-    total_view = len(edited_filtered_df)
-    vips_view = len(edited_filtered_df[edited_filtered_df['Phân loại'] == 'VIP'])
-    potential_view = len(edited_filtered_df[edited_filtered_df['Phân loại'] == 'Tiềm năng'])
-    trash_view = len(edited_filtered_df[edited_filtered_df['Phân loại'] == 'Rác'])
+    if st.button("💾 LƯU KẾT QUẢ KIỂM DUYỆT"):
+        st.session_state.df.update(edited_df)
+        st.success("✅ Đã cập nhật kết quả vào bộ nhớ hệ thống!")
 
-    c1, c2, c3, c4 = st.columns(4)
-    with c1:
-        st.metric("Tổng đang xem", total_view)
-    with c2:
-        st.metric("Khách hàng VIP", vips_view)
-    with c3:
-        st.metric("Tiềm năng", potential_view)
-    with c4:
-        st.metric("Khách rác", trash_view)
-    
+    # --- XUẤT FILE ---
     st.divider()
-    # Nút xuất Excel (Xuất toàn bộ dữ liệu đã được cập nhật hoặc chỉ dữ liệu đang lọc)
-    # Ở đây tôi cho phép chọn xuất dữ liệu đang hiển thị (đã lọc)
-    c_btn1, c_btn2 = st.columns(2)
-    with c_btn1:
-        output_filtered = BytesIO()
-        with pd.ExcelWriter(output_filtered, engine='openpyxl') as writer:
-            edited_filtered_df.to_excel(writer, index=False, sheet_name='Leads_Filtered')
-        
+    st.subheader("📤 XUẤT FILE BÀN GIAO")
+    
+    col_dl1, col_dl2 = st.columns(2)
+    with col_dl1:
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            st.session_state.df.to_excel(writer, index=False, sheet_name='Final_Leads')
         st.download_button(
-            label="📊 Tải Excel (Dữ liệu ĐANG LỌC)",
-            data=output_filtered.getvalue(),
-            file_name="Leads_Filtered_Results.xlsx",
+            label="📄 TẢI TOÀN BỘ FILE EXCEL (XUẤT SALES)",
+            data=output.getvalue(),
+            file_name="MindX_Leads_Report.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
-    
-    with c_btn2:
-        output_all = BytesIO()
-        with pd.ExcelWriter(output_all, engine='openpyxl') as writer:
-            st.session_state.df.to_excel(writer, index=False, sheet_name='Leads_All')
-            
-        st.download_button(
-            label="📁 Tải Excel (TOÀN BỘ dữ liệu)",
-            data=output_all.getvalue(),
-            file_name="Leads_All_Results.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+    with col_dl2:
+        st.info("💡 Lưu ý: File Excel đã được làm sạch và phân loại sẵn cho bộ phận Sales.")
+
 else:
-    st.warning("👈 Vui lòng bấm 'Lấy dữ liệu từ Sheets' để bắt đầu.")
+    st.info("🏠 Chào mừng bạn! Hãy bấm nút 'Lấy dữ liệu' ở trên để bắt đầu quy trình.")
 
+# --- FOOTER ---
 st.divider()
-st.caption("AI Agentic Framework | Lead Scoring Dashboard v2.0")
+st.caption("🚀 AI Agent Workflow | MindX Technology School | Version 3.0")
