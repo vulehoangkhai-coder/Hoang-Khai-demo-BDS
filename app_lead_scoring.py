@@ -74,16 +74,24 @@ st.markdown("""
 def load_data_from_gsheet():
     try:
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-        # Thử tìm file credentials.json
         creds_path = "credentials.json"
+        
         if not os.path.exists(creds_path):
-            st.error("❌ Không tìm thấy file credentials.json!")
+            st.error("❌ Không tìm thấy file credentials.json trên Github!")
             return None
             
-        creds = ServiceAccountCredentials.from_json_keyfile_name(creds_path, scope)
+        # Nạp JSON và xử lý private_key để tránh lỗi format
+        import json
+        with open(creds_path, "r") as f:
+            creds_info = json.load(f)
+        
+        # Đảm bảo các ký tự xuống dòng được xử lý đúng
+        if "private_key" in creds_info:
+            creds_info["private_key"] = creds_info["private_key"].replace("\\n", "\n")
+            
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_info, scope)
         client = gspread.authorize(creds)
         
-        # Mở bằng ID đã cho
         sheet_id = "1zzbszm-d1yyqvAqVPc5n_Re545bG4h8rRWZmT-D-pCM"
         sheet = client.open_by_key(sheet_id).sheet1
         
