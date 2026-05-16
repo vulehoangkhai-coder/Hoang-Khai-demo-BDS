@@ -93,7 +93,20 @@ with st.sidebar:
     sheet_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv"
     
     st.divider()
-    st.info("💡 **Quy trình:**\n1. Lấy dữ liệu từ Google Sheets.\n2. Hệ thống tự động chấm điểm.\n3. Kiểm duyệt và Xuất Excel.")
+    st.subheader("🔍 Bộ lọc dữ liệu")
+    
+    # Lọc theo Phân loại
+    filter_cat = st.multiselect(
+        "Lọc theo Phân loại",
+        options=["VIP", "Tiềm năng", "Rác", "Chưa chấm"],
+        default=["VIP", "Tiềm năng", "Rác", "Chưa chấm"]
+    )
+    
+    # Tìm kiếm theo tên hoặc nội dung
+    search_query = st.text_input("Tìm kiếm (Tên/Mô tả)", placeholder="Nhập từ khóa...")
+    
+    st.divider()
+    st.info("💡 **Quy trình:**\n1. Lấy dữ liệu từ Google Sheets.\n2. Hệ thống tự động chấm điểm.\n3. Sử dụng bộ lọc để kiểm duyệt và Xuất Excel.")
 
 # --- GIAO DIỆN CHÍNH ---
 st.title("🎯 AI LEAD SCORING & AUTOMATION")
@@ -148,17 +161,39 @@ if st.session_state.df is not None:
     st.divider()
     st.subheader("📝 Kiểm duyệt & Bàn giao (Human-in-the-loop)")
     
+    # --- ÁP DỤNG BỘ LỌC ---
+    df_filtered = st.session_state.df.copy()
+    
+    # Lọc theo Phân loại
+    if filter_cat:
+        df_filtered = df_filtered[df_filtered['Phân loại'].isin(filter_cat)]
+    
+    # Lọc theo Tìm kiếm
+    if search_query:
+        search_query = search_query.lower()
+        df_filtered = df_filtered[
+            df_filtered['ten_khach'].str.lower().str.contains(search_query, na=False) | 
+            df_filtered['nhu_cau_mo_ta'].str.lower().str.contains(search_query, na=False)
+        ]
+
     # Hiển thị bảng kết quả cho phép sửa
-    edited_df = st.data_editor(
-        st.session_state.df,
+    # Lưu ý: Vì st.data_editor trả về dữ liệu đã sửa, ta cần ánh xạ lại vào session_state gốc
+    edited_filtered_df = st.data_editor(
+        df_filtered,
         column_config={
             "Điểm AI": st.column_config.NumberColumn("Điểm"),
-            "Phân loại": st.column_config.SelectboxColumn("Phân loại", options=["VIP", "Tiềm năng", "Rác"]),
+            "Phân loại": st.column_config.SelectboxColumn("Phân loại", options=["VIP", "Tiềm năng", "Rác", "Chưa chấm"]),
         },
         use_container_width=True,
-        hide_index=True
+        hide_index=True,
+        key="data_editor"
     )
-    st.session_state.df = edited_df
+    
+    # Cập nhật lại session_state.df dựa trên các thay đổi trong edited_filtered_df
+    if st.button("💾 Lưu thay đổi vừa sửa"):
+        # Ánh xạ kết quả sửa từ bảng lọc quay lại bảng tổng
+        st.session_state.df.update(edited_filtered_df)
+        st.success("Đã lưu thay đổi vào hệ thống!")
 
     # --- THỐNG KÊ & XUẤT FILE ---
     st.divider()
