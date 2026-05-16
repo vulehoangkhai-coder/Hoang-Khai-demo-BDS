@@ -1,7 +1,5 @@
 import streamlit as st
 import pandas as pd
-import google.generativeai as genai
-import json
 import os
 from io import BytesIO
 
@@ -34,69 +32,68 @@ st.markdown("""
         box-shadow: 0 4px 8px rgba(0,0,0,0.1);
     }
     .vip-card {
-        padding: 20px;
-        border-radius: 10px;
-        background: linear-gradient(135deg, #FFD700 0%, #FF8C00 100%);
-        color: white;
-        margin-bottom: 10px;
-    }
-    .trash-card {
-        padding: 20px;
-        border-radius: 10px;
-        background: linear-gradient(135deg, #6c757d 0%, #343a40 100%);
-        color: white;
-        margin-bottom: 10px;
-    }
-    .potential-card {
-        padding: 20px;
-        border-radius: 10px;
-        background: linear-gradient(135deg, #28a745 0%, #218838 100%);
-        color: white;
-        margin-bottom: 10px;
+        padding: 10px;
+        border-radius: 5px;
+        background-color: #FFD700;
+        color: black;
+        font-weight: bold;
+        text-align: center;
     }
     </style>
     """, unsafe_allow_html=True)
 
+# --- LOGIC CHẤM ĐIỂM NỘI BỘ (KHÔNG CẦN API KEY) ---
+def score_lead_local(description):
+    desc = str(description).lower()
+    score = 0
+    reasons = []
+    
+    # VIP Criteria
+    if any(k in desc for k in ["20 tỷ", "30 tỷ", "50 tỷ", "100 tỷ", "tài chính mạnh", "không thành vấn đề"]):
+        score += 50
+        reasons.append("Ngân sách lớn")
+    if any(k in desc for k in ["biệt thự", "penthouse", "shophouse", "công nghiệp", "văn phòng"]):
+        score += 50
+        reasons.append("Loại hình cao cấp")
+    if any(k in desc for k in ["quận 1", "ven sông", "vinhomes", "phú mỹ hưng"]):
+        score += 50
+        reasons.append("Vị trí đắc địa")
+    if any(k in desc for k in ["chủ doanh nghiệp", "nhà đầu tư", "mua sỉ"]):
+        score += 50
+        reasons.append("Khách hàng VIP")
+    if any(k in desc for k in ["pháp lý", "sổ hồng", "chủ đầu tư"]):
+        score += 50
+        reasons.append("Pháp lý/Cấp thiết")
+
+    # Trash Criteria
+    if "quận 1" in desc and any(k in desc for k in ["1 tỷ", "2 tỷ"]):
+        score -= 50
+        reasons.append("Giá phi thực tế")
+    if any(k in desc for k in ["nhầm số", "không có nhu cầu", "dữ liệu cũ"]):
+        score -= 50
+        reasons.append("Dữ liệu lỗi")
+    if any(k in desc for k in ["bảo hiểm", "vay vốn", "quảng cáo"]):
+        score -= 50
+        reasons.append("Spam/Dịch vụ khác")
+        
+    category = "Tiềm năng"
+    if score >= 50: category = "VIP"
+    elif score <= -50: category = "Rác"
+    
+    return score, category, "; ".join(reasons)
+
 # --- SIDEBAR ---
 with st.sidebar:
     st.image("https://img.icons8.com/clouds/100/000000/manager.png", width=100)
-    st.title("⚙️ Cấu hình Hệ thống")
+    st.title("⚙️ Hệ thống Lead Scoring")
     
-    api_key = st.text_input("Gemini API Key", type="password", placeholder="Dán API Key vào đây...")
+    st.success("✅ Chế độ: Chấm điểm Nội bộ (Không cần API Key)")
+    
     sheet_id = "1zzbszm-d1yyqvAqVPc5n_Re545bG4h8rRWZmT-D-pCM"
     sheet_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv"
     
     st.divider()
-    st.info("💡 **Hướng dẫn:**\n1. Nhập API Key.\n2. Bấm 'Lấy dữ liệu'.\n3. Bấm 'Chấm điểm bằng AI'.\n4. Chỉnh sửa nếu cần và Xuất Excel.")
-
-# --- KHỞI TẠO AI ---
-def get_ai_response(prompt, system_instruction):
-    if not api_key:
-        st.error("Vui lòng nhập Gemini API Key ở Sidebar!")
-        return None
-    
-    try:
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel(
-            model_name="gemini-1.5-flash",
-            system_instruction=system_instruction
-        )
-        response = model.generate_content(prompt)
-        # Loại bỏ các ký tự Markdown nếu AI trả về
-        clean_text = response.text.replace("```json", "").replace("```", "").strip()
-        return json.loads(clean_text)
-    except Exception as e:
-        st.error(f"Lỗi AI: {str(e)}")
-        return None
-
-# --- TẢI FILE SKILL ---
-@st.cache_data
-def load_skill():
-    try:
-        with open("lead_scoring_skill.md", "r", encoding="utf-8") as f:
-            return f.read()
-    except:
-        return "Bạn là một chuyên gia Lead Scoring ngành Bất động sản. Hãy chấm điểm dựa trên mô tả nhu cầu."
+    st.info("💡 **Quy trình:**\n1. Lấy dữ liệu từ Google Sheets.\n2. Hệ thống tự động chấm điểm.\n3. Kiểm duyệt và Xuất Excel.")
 
 # --- GIAO DIỆN CHÍNH ---
 st.title("🎯 AI LEAD SCORING & AUTOMATION")
@@ -112,98 +109,73 @@ with col1:
         with st.spinner("Đang tải dữ liệu..."):
             try:
                 st.session_state.df = pd.read_csv(sheet_url)
-                # Đảm bảo có các cột kết quả
-                if 'Điểm AI' not in st.session_state.df.columns:
-                    st.session_state.df['Điểm AI'] = 0
-                    st.session_state.df['Phân loại'] = "Chưa chấm"
-                    st.session_state.df['Lý do'] = ""
-                st.success(f"Đã tải {len(st.session_state.df)} dòng dữ liệu!")
+                st.success(f"Đã tải {len(st.session_state.df)} dòng!")
             except Exception as e:
                 st.error(f"Lỗi tải dữ liệu: {e}")
 
 with col2:
-    if st.button("🤖 Chấm điểm bằng AI (Gemini)") and st.session_state.df is not None:
-        skill_content = load_skill()
+    if st.button("🤖 Bắt đầu chấm điểm tự động") and st.session_state.df is not None:
         progress_bar = st.progress(0)
         status_text = st.empty()
         
+        # Tạo các cột mới
+        scores = []
+        categories = []
+        reasons = []
+        
         for index, row in st.session_state.df.iterrows():
-            status_text.text(f"Đang phân tích khách hàng: {row['ten_khach']}...")
-            
-            # Chuẩn bị prompt cho AI
-            prompt = f"""
-            Phân tích dữ liệu sau:
-            - Tên: {row['ten_khach']}
-            - Nhu cầu mô tả: {row['nhu_cau_mo_ta']}
-            
-            Trả về kết quả dưới định dạng JSON duy nhất:
-            {{
-                "score": <số điểm>,
-                "category": "<VIP/Tiềm năng/Rác>",
-                "reason": "<lý do ngắn gọn>"
-            }}
-            """
-            
-            result = get_ai_response(prompt, skill_content)
-            
-            if result:
-                st.session_state.df.at[index, 'Điểm AI'] = result.get('score', 0)
-                st.session_state.df.at[index, 'Phân loại'] = result.get('category', "Tiềm năng")
-                st.session_state.df.at[index, 'Lý do'] = result.get('reason', "")
-            
+            status_text.text(f"Đang xử lý: {row['ten_khach']}...")
+            s, c, r = score_lead_local(row['nhu_cau_mo_ta'])
+            scores.append(s)
+            categories.append(c)
+            reasons.append(r)
             progress_bar.progress((index + 1) / len(st.session_state.df))
+        
+        st.session_state.df['Điểm AI'] = scores
+        st.session_state.df['Phân loại'] = categories
+        st.session_state.df['Lý do'] = reasons
         
         status_text.text("✅ Hoàn thành chấm điểm!")
         st.balloons()
 
-# --- HIỂN THỊ DỮ LIỆU & HUMAN-IN-THE-LOOP ---
+# --- HIỂN THỊ & KIỂM DUYỆT ---
 if st.session_state.df is not None:
     st.divider()
-    st.subheader("📝 Kiểm duyệt dữ liệu (Human-in-the-loop)")
+    st.subheader("📝 Kiểm duyệt & Bàn giao (Human-in-the-loop)")
     
-    # Cho phép chỉnh sửa trực tiếp trên bảng
+    # Hiển thị bảng kết quả cho phép sửa
     edited_df = st.data_editor(
         st.session_state.df,
         column_config={
-            "Điểm AI": st.column_config.NumberColumn("Điểm", help="Điểm số do AI chấm"),
-            "Phân loại": st.column_config.SelectboxColumn(
-                "Phân loại",
-                options=["VIP", "Tiềm năng", "Rác"],
-                help="Phân loại khách hàng"
-            ),
+            "Điểm AI": st.column_config.NumberColumn("Điểm"),
+            "Phân loại": st.column_config.SelectboxColumn("Phân loại", options=["VIP", "Tiềm năng", "Rác"]),
         },
-        disabled=["id", "ten_khach", "sdt", "nhu_cau_mo_ta"], # Chỉ cho sửa kết quả AI
         use_container_width=True,
         hide_index=True
     )
-    
-    # Cập nhật lại session state sau khi sửa
     st.session_state.df = edited_df
 
-    # --- XUẤT DỮ LIỆU ---
+    # --- THỐNG KÊ & XUẤT FILE ---
     st.divider()
-    c1, c2, c3 = st.columns(3)
+    c1, c2 = st.columns([1, 1])
     
     with c1:
-        # Thống kê nhanh
         vips = len(st.session_state.df[st.session_state.df['Phân loại'] == 'VIP'])
-        st.metric("Khách hàng VIP", vips)
+        st.metric("Tổng số khách hàng VIP", vips)
     
     with c2:
-        # Nút xuất Excel
         output = BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            st.session_state.df.to_excel(writer, index=False, sheet_name='Leads_Processed')
+            st.session_state.df.to_excel(writer, index=False, sheet_name='Leads_Results')
         
         st.download_button(
-            label="📊 Xuất file Excel bàn giao",
+            label="📊 Tải file Excel bàn giao",
             data=output.getvalue(),
             file_name="Leads_Scoring_Results.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 else:
-    st.warning("👈 Vui lòng bấm 'Lấy dữ liệu từ Sheets' ở Sidebar để bắt đầu.")
+    st.warning("👈 Vui lòng bấm 'Lấy dữ liệu từ Sheets' để bắt đầu.")
 
-# --- FOOTER ---
 st.divider()
-st.caption("AI Agentic Framework - Lead Scoring Module v1.0 | Powered by Gemini 1.5 Flash")
+st.caption("AI Agentic Framework | Lead Scoring Dashboard v2.0")
